@@ -261,4 +261,140 @@
 #endif
 */
 
+#ifdef CPU_MAP_SANGUINOLOLU // For the REPRAP board Sanguinololu
+
+  // Define serial port pins and interrupt vectors.
+  #define SERIAL_RX     USART0_RX_vect
+  #define SERIAL_UDRE   USART0_UDRE_vect
+
+
+  #define X_STEP_BIT         0  // Uno Digital Pin 2
+  #define X_STEP_MASK        (1 << X_STEP_BIT)
+  #define Y_STEP_BIT         1  // Uno Digital Pin 3
+  #define Y_STEP_MASK        (1 << Y_STEP_BIT) 
+  #define Z_STEP_BIT         2  // Uno Digital Pin 4
+  #define Z_STEP_MASK        (1 << Z_STEP_BIT)
+  #define X_DIRECTION_BIT    3  // Uno Digital Pin 5
+  #define X_DIRECTION_MASK   (1 << X_DIRECTION_BIT)
+  #define Y_DIRECTION_BIT    4  // Uno Digital Pin 6
+  #define Y_DIRECTION_MASK   (1 << Y_DIRECTION_BIT)
+  #define Z_DIRECTION_BIT    5  // Uno Digital Pin 7
+  #define Z_DIRECTION_MASK   (1 << Z_DIRECTION_BIT)
+  
+  
+  #define STEP_DDR_X       DDRD
+  #define STEP_PORT_X      PORTD
+  #define STEP_X           PD7
+  
+  #define DIR_DDR_X        DDRC
+  #define DIRECTION_PORT_X       PORTC
+  #define DIR_X            PC5
+  
+  #define STEP_DDR_Y       DDRC
+  #define STEP_PORT_Y      PORTC
+  #define STEP_Y           PC6
+  
+  #define DIR_DDR_Y        DDRC
+  #define DIRECTION_PORT_Y       PORTC
+  #define DIR_Y            PC7
+  
+  #define STEP_DDR_Z       DDRB
+  #define STEP_PORT_Z      PORTB
+  #define STEP_Z           PB3
+  
+  #define DIR_DDR_Z        DDRB
+  #define DIRECTION_PORT_Z       PORTB
+  #define DIR_Z   PB2
+
+  #define STEP_MASK ((1<<X_STEP_BIT)|(1<<Y_STEP_BIT)|(1<<Z_STEP_BIT)) // All step bits
+  #define DIRECTION_MASK ((1<<X_DIRECTION_BIT)|(1<<Y_DIRECTION_BIT)|(1<<Z_DIRECTION_BIT)) // All direction bits
+  #define STEPPING_MASK (STEP_MASK | DIRECTION_MASK) // All stepping-related bits (step/direction)
+
+  #define STEPPERS_DISABLE_DDR    DDRD
+  #define STEPPERS_DISABLE_PORT   PORTD
+  #define STEPPERS_DISABLE_BIT    PD6
+  #define STEPPERS_DISABLE_MASK (1<<STEPPERS_DISABLE_BIT)
+
+  //on Sanguinololu, there are separate STEPPER_EN pin for XY and Z drivers
+  #define STEPPERS_DISABLE_Z_DDR    DDRA
+  #define STEPPERS_DISABLE_Z_PORT   PORTA
+  #define STEPPERS_DISABLE_Z_BIT    PA5
+  #define STEPPERS_DISABLE_Z_MASK (1<<STEPPERS_DISABLE_Z_BIT)
+
+
+    // NOTE: All limit bit pins must be on the same port
+  #define LIMIT_DDR       DDRC
+  #define LIMIT_PIN       PINC
+  #define LIMIT_PORT      PORTC
+  #define X_LIMIT_BIT     2  // Uno Digital Pin 9
+  #define Y_LIMIT_BIT     3  // Uno Digital Pin 10
+  #define Z_LIMIT_BIT     4  // Uno Digital Pin 11
+  #define LIMIT_INT       PCIE2  // Pin change interrupt enable pin
+  #define LIMIT_INT_vect  PCINT2_vect 
+  #define LIMIT_PCMSK     PCMSK2 // Pin change interrupt register
+  #define LIMIT_MASK ((1<<X_LIMIT_BIT)|(1<<Y_LIMIT_BIT)|(1<<Z_LIMIT_BIT)) // All limit bits
+
+  #define SPINDLE_ENABLE_DDR   DDRD
+  #define SPINDLE_ENABLE_PORT  PORTD
+  #define SPINDLE_ENABLE_BIT   5  // Hotend mosfet output
+
+  #define SPINDLE_DIRECTION_DDR   DDRD
+  #define SPINDLE_DIRECTION_PORT  PORTD
+  #define SPINDLE_DIRECTION_BIT   4  // Heated bed mosfet output
+
+  #define COOLANT_FLOOD_DDR   DDRD
+  #define COOLANT_FLOOD_PORT  PORTD
+  #define COOLANT_FLOOD_BIT   4  // Uno Analog Pin 3
+
+  // NOTE: Uno analog pins 4 and 5 are reserved for an i2c interface, and may be installed at
+  // a later date if flash and memory space allows.
+  // #define ENABLE_M7  // Mist coolant disabled by default. Uncomment to enable.
+  #ifdef ENABLE_M7
+    #define COOLANT_MIST_DDR   DDRC
+    #define COOLANT_MIST_PORT  PORTC
+    #define COOLANT_MIST_BIT   4 // Uno Analog Pin 4
+  #endif  
+
+  // NOTE: All pinouts pins must be on the same port
+  #define PINOUT_DDR       DDRA
+  #define PINOUT_PIN       PINA
+  #define PINOUT_PORT      PORTA
+  #define PIN_RESET        0  // A0
+  #define PIN_FEED_HOLD    1  // A1
+  #define PIN_CYCLE_START  2  // A2
+  #define PINOUT_INT       PCIE0  // Pin change interrupt enable pin
+  #define PINOUT_INT_vect  PCINT0_vect
+  #define PINOUT_PCMSK     PCMSK0 // Pin change interrupt register
+  #define PINOUT_MASK ((1<<PIN_RESET)|(1<<PIN_FEED_HOLD)|(1<<PIN_CYCLE_START))
+
+  
+  #ifdef VARIABLE_SPINDLE
+    // Advanced Configuration Below You should not need to touch these variables
+    #define TCCRA_REGISTER	 TCCR2A
+    #define TCCRB_REGISTER	 TCCR2B
+    #define OCR_REGISTER     OCR2A
+
+    #define COMB_BIT	     COM2A1
+    #define WAVE0_REGISTER	 WGM20
+    #define WAVE1_REGISTER	 WGM21
+    #define WAVE2_REGISTER	 WGM22
+    #define WAVE3_REGISTER	 WGM23
+
+    // NOTE: On the 328p, these must be the same as the SPINDLE_ENABLE settings.
+    #define SPINDLE_PWM_DDR	  SPINDLE_ENABLE_DDR
+    #define SPINDLE_PWM_PORT  SPINDLE_ENABLE_PORT
+    #define SPINDLE_PWM_BIT	  SPINDLE_ENABLE_BIT // Shared with SPINDLE_ENABLE.
+  #endif // End of VARIABLE_SPINDLE
+  
+  // Define probe switch input pin.
+  #define PROBE_DDR       DDRA
+  #define PROBE_PIN       PINA
+  #define PROBE_PORT      PORTA
+  #define PROBE_BIT       PA7  // Extruder thermista input
+  #define PROBE_MASK      (1<<PROBE_BIT)
+
+#endif
+
+//----------------------------------------------------------------------------------------
+
 #endif

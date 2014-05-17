@@ -184,8 +184,13 @@ static st_prep_t prep;
 void st_wake_up() 
 {
   // Enable stepper drivers.
-  if (bit_istrue(settings.flags,BITFLAG_INVERT_ST_ENABLE)) { STEPPERS_DISABLE_PORT |= (1<<STEPPERS_DISABLE_BIT); }
-  else { STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT); }
+  if (bit_istrue(settings.flags,BITFLAG_INVERT_ST_ENABLE)) { 
+    STEPPERS_DISABLE_PORT |= (1<<STEPPERS_DISABLE_BIT); 
+    STEPPERS_DISABLE_Z_PORT |= (1<<STEPPERS_DISABLE_Z_BIT); 
+  } else { 
+    STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT);
+    STEPPERS_DISABLE_Z_PORT &= ~(1<<STEPPERS_DISABLE_Z_BIT);
+  }
 
   if (sys.state & (STATE_CYCLE | STATE_HOMING)){
     // Initialize stepper output bits
@@ -226,8 +231,16 @@ void st_go_idle()
     pin_state = true; // Override. Disable steppers.
   }
   if (bit_istrue(settings.flags,BITFLAG_INVERT_ST_ENABLE)) { pin_state = !pin_state; } // Apply pin invert.
-  if (pin_state) { STEPPERS_DISABLE_PORT |= (1<<STEPPERS_DISABLE_BIT); }
-  else { STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT); }
+  if (pin_state) 
+	{ 
+	STEPPERS_DISABLE_PORT |= (1<<STEPPERS_DISABLE_BIT); 
+	STEPPERS_DISABLE_Z_PORT &= ~(1<<STEPPERS_DISABLE_Z_BIT); 
+	}
+  else 
+	{ 
+  STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT); 
+  STEPPERS_DISABLE_Z_PORT |= (1<<STEPPERS_DISABLE_Z_BIT);
+	}
 }
 
 
@@ -285,14 +298,38 @@ ISR(TIMER1_COMPA_vect)
   if (busy) { return; } // The busy-flag is used to avoid reentering this interrupt
   
   // Set the direction pins a couple of nanoseconds before we step the steppers
-  DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | (st.dir_outbits & DIRECTION_MASK);
+  //DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | (st.dir_outbits & DIRECTION_MASK);
+  if (st.dir_outbits & X_DIRECTION_MASK)
+      DIRECTION_PORT_X |= (1 << DIR_X);
+  else
+      DIRECTION_PORT_X &= ~(1 << DIR_X);
 
-  // Then pulse the stepping pins
+  if (st.dir_outbits & Y_DIRECTION_MASK)
+      DIRECTION_PORT_Y |= (1 << DIR_Y);
+    else
+      DIRECTION_PORT_Y &= ~(1 << DIR_Y);
+
+  if (st.dir_outbits & Z_DIRECTION_MASK)
+      DIRECTION_PORT_Z |= (1 << DIR_Z);
+ else
+      DIRECTION_PORT_Z &= ~(1 << DIR_Z);
+
+  
+ // Then pulse the stepping pins
   #ifdef STEP_PULSE_DELAY
-    st.step_bits = (STEP_PORT & ~STEP_MASK) | st.step_outbits; // Store out_bits to prevent overwriting.
-  #else  // Normal operation
-    STEP_PORT = (STEP_PORT & ~STEP_MASK) | st.step_outbits;
-  #endif  
+    #error STEP_PULSE_DELAY does not work with pins not on same ports
+  #endif // Normal operation
+
+    //STEP_PORT = (STEP_PORT & ~STEP_MASK) | st.step_outbits;
+
+    if (st.step_outbits & X_STEP_MASK)
+        STEP_PORT_X |= (1 << STEP_X);
+
+    if (st.step_outbits & Y_STEP_MASK)
+        STEP_PORT_Y |= (1 << STEP_Y);
+
+    if (st.step_outbits & Z_STEP_MASK)
+        STEP_PORT_Z |= (1 << STEP_Z);
 
   // Enable step pulse reset timer so that The Stepper Port Reset Interrupt can reset the signal after
   // exactly settings.pulse_microseconds microseconds, independent of the main Timer1 prescaler.
@@ -419,10 +456,14 @@ ISR(TIMER1_COMPA_vect)
 ISR(TIMER0_OVF_vect)
 {
   // Reset stepping pins (leave the direction pins)
-  STEP_PORT = (STEP_PORT & ~STEP_MASK) | (settings.step_invert_mask & STEP_MASK); 
+  //STEP_PORT = (STEP_PORT & ~STEP_MASK) | (settings.step_invert_mask & STEP_MASK); 
+  STEP_PORT_X &= ~(1 << STEP_X);
+  STEP_PORT_Y &= ~(1 << STEP_Y);
+  STEP_PORT_Z &= ~(1 << STEP_Z);
   TCCR0B = 0; // Disable Timer0 to prevent re-entering this interrupt when it's not needed. 
 }
 #ifdef STEP_PULSE_DELAY
+#error STEP_PULSE_DELAY will not work correctly.
   // This interrupt is used only when STEP_PULSE_DELAY is enabled. Here, the step pulse is
   // initiated after the STEP_PULSE_DELAY time period has elapsed. The ISR TIMER2_OVF interrupt
   // will then trigger after the appropriate settings.pulse_microseconds, as in normal operation.
@@ -457,11 +498,23 @@ void st_reset()
 void stepper_init()
 {
   // Configure step and direction interface pins
-  STEP_DDR |= STEP_MASK;
+  /*STEP_DDR |= STEP_MASK;
   STEP_PORT = (STEP_PORT & ~STEP_MASK) | settings.step_invert_mask;
   STEPPERS_DISABLE_DDR |= 1<<STEPPERS_DISABLE_BIT;
   DIRECTION_DDR |= DIRECTION_MASK;
   DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | settings.dir_invert_mask;
+  */
+  
+  STEP_DDR_X |= (1<<STEP_X);
+  STEP_DDR_Y |= (1<<STEP_Y);
+  STEP_DDR_Z |= (1<<STEP_Z);
+
+  DIR_DDR_X  |= (1<<DIR_X);
+  DIR_DDR_Y  |= (1<<DIR_Y);
+  DIR_DDR_Z  |= (1<<DIR_Z);
+  
+  STEPPERS_DISABLE_DDR |= 1<<STEPPERS_DISABLE_BIT;
+  STEPPERS_DISABLE_Z_DDR |= 1<<STEPPERS_DISABLE_Z_BIT;
 
   // Configure Timer 1: Stepper Driver Interrupt
   TCCR1B &= ~(1<<WGM13); // waveform generation = 0100 = CTC
