@@ -36,42 +36,32 @@ static char line[LINE_BUFFER_SIZE]; // Line to be executed. Zero-terminated.
 // Directs and executes one line of formatted input from protocol_process. While mostly
 // incoming streaming g-code blocks, this also directs and executes Grbl internal commands,
 // such as settings, initiating the homing cycle, and toggling switch states.
-// TODO: Eventually re-organize this function to more cleanly organize order of operations,
-// which will hopefully reduce some of the current spaghetti logic and dynamic memory usage. 
 static void protocol_execute_line(char *line) 
 {      
   protocol_execute_runtime(); // Runtime command check point.
   if (sys.abort) { return; } // Bail to calling function upon system abort  
 
-  uint8_t status;
   if (line[0] == 0) {
     // Empty or comment line. Send status message for syncing purposes.
-    status = STATUS_OK;
+    report_status_message(STATUS_OK);
 
   } else if (line[0] == '$') {
     // Grbl '$' system command
-    status = system_execute_line(line);
+    report_status_message(system_execute_line(line));
     
+  } else if (sys.state == STATE_ALARM) {
+    // Everything else is gcode. Block if in alarm mode.
+    report_status_message(STATUS_ALARM_LOCK);
+
   } else {
-    // Everything else is gcode. Send to g-code parser! Block if in alarm mode.
-    if (sys.state == STATE_ALARM) { status = STATUS_ALARM_LOCK; }
-    else { status = gc_execute_line(line); }
-    
-    // TODO: Separate the parsing from the g-code execution. Need to re-write the parser
-    // completely to do this. First parse the line completely, checking for modal group 
-    // errors and storing all of the g-code words. Then, send the stored g-code words to
-    // a separate g-code executor. This will be more in-line with actual g-code protocol.
-    
-    // TODO: Clean up the multi-tasking workflow with the execution of commands. It's a 
-    // bit complicated and patch-worked. Could be made simplier to understand.
+    // Parse and execute g-code block!
+    report_status_message(gc_execute_line(line));
   }
-  
-  report_status_message(status);
 }
 
 
 /* 
-  GRBL MAIN LOOP:
+  GRBL PRIMARY LOOP:
 */
 void protocol_main_loop()
 {
@@ -91,9 +81,9 @@ void protocol_main_loop()
     system_execute_startup(line); // Execute startup script.
   }
     
-  // ------------------------------------------------------------------------------  
-  // Main loop! Upon a system abort, this exits back to main() to reset the system. 
-  // ------------------------------------------------------------------------------  
+  // ---------------------------------------------------------------------------------  
+  // Primary loop! Upon a system abort, this exits back to main() to reset the system. 
+  // ---------------------------------------------------------------------------------  
   
   uint8_t iscomment = false;
   uint8_t char_counter = 0;
@@ -102,6 +92,14 @@ void protocol_main_loop()
 
     // Process one line of incoming serial data, as the data becomes available. Performs an
     // initial filtering by removing spaces and comments and capitalizing all letters.
+    
+    // NOTE: While comment, spaces, and block delete(if supported) handling should technically 
+    // be done in the g-code parser, doing it here helps compress the incoming data into Grbl's
+    // line buffer, which is limited in size. The g-code standard actually states a line can't
+    // exceed 256 characters, but the Arduino Uno does not have the memory space for this.
+    // With a better processor, it would be very easy to pull this initial parsing out as a 
+    // seperate task to be shared by the g-code parser and Grbl's system commands.
+    
     while((c = serial_read()) != SERIAL_NO_DATA) {
       if ((c == '\n') || (c == '\r')) { // End of line reached
         line[char_counter] = 0; // Set string termination character.
@@ -117,12 +115,27 @@ void protocol_main_loop()
           }
         } else {
           if (c <= ' ') { 
-            // Throw away whitepace and control characters
+            // Throw away whitepace and control characters  
           } else if (c == '/') { 
-            // Block delete not supported. Ignore character.
+            // Block delete NOT SUPPORTED. Ignore character.
+            // NOTE: If supported, would simply need to check the system if block delete is enabled.
           } else if (c == '(') {
             // Enable comments flag and ignore all characters until ')' or EOL.
+            // NOTE: This doesn't follow the NIST definition exactly, but is good enough for now.
+            // In the future, we could simply remove the items within the comments, but retain the
+            // comment control characters, so that the g-code parser can error-check it.
             iscomment = true;
+          // } else if (c == ';') {
+            // Comment character to EOL NOT SUPPORTED. LinuxCNC definition. Not NIST.
+            
+          // TODO: Install '%' feature 
+          // } else if (c == '%') {
+            // Program start-end percent sign NOT SUPPORTED.
+            // NOTE: This maybe installed to tell Grbl when a program is running vs manual input,
+            // where, during a program, the system auto-cycle start will continue to execute 
+            // everything until the next '%' sign. This will help fix resuming issues with certain
+            // functions that empty the planner buffer to execute its task on-time.
+
           } else if (char_counter >= LINE_BUFFER_SIZE-1) {
             // Detect line buffer overflow. Report error and reset line buffer.
             report_status_message(STATUS_OVERFLOW);
@@ -179,7 +192,7 @@ void protocol_execute_runtime()
         if (rt_exec & EXEC_ALARM) { report_alarm_message(ALARM_LIMIT_ERROR); }
         else { report_alarm_message(ALARM_PROBE_FAIL); }
         report_feedback_message(MESSAGE_CRITICAL_EVENT);
-        bit_false(sys.execute,EXEC_RESET); // Disable any existing reset
+        bit_false_atomic(sys.execute,EXEC_RESET); // Disable any existing reset
         do { 
           // Nothing. Block EVERYTHING until user issues reset or power cycles. Hard limits
           // typically occur while unattended or not paying attention. Gives the user time
@@ -195,7 +208,7 @@ void protocol_execute_runtime()
         // to indicate the possible severity of the problem.
         report_alarm_message(ALARM_ABORT_CYCLE);
       }
-      bit_false(sys.execute,(EXEC_ALARM | EXEC_CRIT_EVENT));
+      bit_false_atomic(sys.execute,(EXEC_ALARM | EXEC_CRIT_EVENT));
     } 
   
     // Execute system abort. 
@@ -207,7 +220,7 @@ void protocol_execute_runtime()
     // Execute and serial print status
     if (rt_exec & EXEC_STATUS_REPORT) { 
       report_realtime_status();
-      bit_false(sys.execute,EXEC_STATUS_REPORT);
+      bit_false_atomic(sys.execute,EXEC_STATUS_REPORT);
     }
     
     // Execute a feed hold with deceleration, only during cycle.
@@ -220,7 +233,7 @@ void protocol_execute_runtime()
         st_prep_buffer();
         sys.auto_start = false; // Disable planner auto start upon feed hold.
       }
-      bit_false(sys.execute,EXEC_FEED_HOLD);
+      bit_false_atomic(sys.execute,EXEC_FEED_HOLD);
     }
         
     // Execute a cycle start by starting the stepper interrupt begin executing the blocks in queue.
@@ -235,7 +248,7 @@ void protocol_execute_runtime()
           sys.auto_start = false; // Reset auto start per settings.
         }
       }    
-      bit_false(sys.execute,EXEC_CYCLE_START);
+      bit_false_atomic(sys.execute,EXEC_CYCLE_START);
     }
     
     // Reinitializes the cycle plan and stepper system after a feed hold for a resume. Called by 
@@ -246,7 +259,7 @@ void protocol_execute_runtime()
     if (rt_exec & EXEC_CYCLE_STOP) {
       if ( plan_get_current_block() ) { sys.state = STATE_QUEUED; }
       else { sys.state = STATE_IDLE; }
-      bit_false(sys.execute,EXEC_CYCLE_STOP);
+      bit_false_atomic(sys.execute,EXEC_CYCLE_STOP);
     }
 
   }
@@ -283,4 +296,4 @@ void protocol_buffer_synchronize()
 // NOTE: This function is called from the main loop and mc_line() only and executes when one of
 // two conditions exist respectively: There are no more blocks sent (i.e. streaming is finished, 
 // single commands), or the planner buffer is full and ready to go.
-void protocol_auto_cycle_start() { if (sys.auto_start) { sys.execute |= EXEC_CYCLE_START; } } 
+void protocol_auto_cycle_start() { if (sys.auto_start) { bit_true_atomic(sys.execute, EXEC_CYCLE_START); } } 
