@@ -1,9 +1,8 @@
 /*
   protocol.c - controls Grbl execution protocol and procedures
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon  
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon  
 
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,6 +17,12 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/ 
 
 #include "system.h"
 #include "serial.h"
@@ -136,7 +141,7 @@ void protocol_main_loop()
             // everything until the next '%' sign. This will help fix resuming issues with certain
             // functions that empty the planner buffer to execute its task on-time.
 
-          } else if (char_counter >= LINE_BUFFER_SIZE-1) {
+          } else if (char_counter >= (LINE_BUFFER_SIZE-1)) {
             // Detect line buffer overflow. Report error and reset line buffer.
             report_status_message(STATUS_OVERFLOW);
             iscomment = false;
@@ -277,6 +282,8 @@ void protocol_execute_runtime()
 // during a synchronize call, if it should happen. Also, waits for clean cycle end.
 void protocol_buffer_synchronize()
 {
+  // If system is queued, ensure cycle resumes if the auto start flag is present.
+  protocol_auto_cycle_start();
   // Check and set auto start to resume cycle after synchronize and caller completes.
   if (sys.state == STATE_CYCLE) { sys.auto_start = true; }
   while (plan_get_current_block() || (sys.state == STATE_CYCLE)) { 

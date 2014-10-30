@@ -1,9 +1,8 @@
 /*
   gcode.c - rs274/ngc parser.
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon
   
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,6 +17,12 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/  
 
 #include "system.h"
 #include "settings.h"
@@ -95,6 +100,7 @@ uint8_t gc_execute_line(char *line)
   memcpy(&gc_block.modal,&gc_state.modal,sizeof(gc_modal_t)); // Copy current modes
   uint8_t axis_command = AXIS_COMMAND_NONE;
   uint8_t axis_0, axis_1, axis_linear;
+  uint8_t coord_select = 0; // Tracks G10 P coordinate selection for execution
   float coordinate_data[N_AXIS]; // Multi-use variable to store coordinate data for execution
   float parameter_data[N_AXIS]; // Multi-use variable to store parameter data for execution
   
@@ -117,8 +123,7 @@ uint8_t gc_execute_line(char *line)
   char letter;
   float value;
   uint8_t int_value = 0;
-  uint8_t mantissa = 0; // NOTE: For mantissa values > 255, variable type must be changed to uint16_t.
-
+  uint16_t mantissa = 0;
 
   while (line[char_counter] != 0) { // Loop until no more g-code words in line.
     
@@ -204,11 +209,10 @@ uint8_t gc_execute_line(char *line)
               case 3: gc_block.modal.motion = MOTION_MODE_CCW_ARC; break; // G3
               case 38: 
                 switch(mantissa) {
-                  case 20: gc_block.modal.motion = MOTION_MODE_PROBE; break;  // G38.2
-                  // NOTE: If G38.3+ are enabled, change mantissa variable type to uint16_t.
-                  // case 30: gc_block.modal.motion = MOTION_MODE_PROBE_NO_ERROR; break; // G38.3 Not supported.
-                  // case 40: // Not supported.
-                  // case 50: // Not supported.
+                  case 20: gc_block.modal.motion = MOTION_MODE_PROBE_TOWARD; break; // G38.2
+                  case 30: gc_block.modal.motion = MOTION_MODE_PROBE_TOWARD_NO_ERROR; break; // G38.3
+                  case 40: gc_block.modal.motion = MOTION_MODE_PROBE_AWAY; break; // G38.4
+                  case 50: gc_block.modal.motion = MOTION_MODE_PROBE_AWAY_NO_ERROR; break; // G38.5
                   default: FAIL(STATUS_GCODE_UNSUPPORTED_COMMAND); // [Unsupported G38.x command]
                 }
                 mantissa = 0; // Set to zero to indicate valid non-integer G command.
@@ -526,19 +530,21 @@ uint8_t gc_execute_line(char *line)
       // [G10 L20 Errors]: P must be 0 to nCoordSys(max 9). Axis words missing.
       if (!axis_words) { FAIL(STATUS_GCODE_NO_AXIS_WORDS) }; // [No axis words]
       if (bit_isfalse(value_words,((1<<WORD_P)|(1<<WORD_L)))) { FAIL(STATUS_GCODE_VALUE_WORD_MISSING); } // [P/L word missing]
-      int_value = trunc(gc_block.values.p); // Convert p value to int.
-      if (int_value > N_COORDINATE_SYSTEM) { FAIL(STATUS_GCODE_UNSUPPORTED_COORD_SYS); } // [Greater than N sys]
+      coord_select = trunc(gc_block.values.p); // Convert p value to int.
+      if (coord_select > N_COORDINATE_SYSTEM) { FAIL(STATUS_GCODE_UNSUPPORTED_COORD_SYS); } // [Greater than N sys]
       if (gc_block.values.l != 20) {
         if (gc_block.values.l == 2) {
           if (bit_istrue(value_words,bit(WORD_R))) { FAIL(STATUS_GCODE_UNSUPPORTED_COMMAND); } // [G10 L2 R not supported]
         } else { FAIL(STATUS_GCODE_UNSUPPORTED_COMMAND); } // [Unsupported L]
       }
       bit_false(value_words,(bit(WORD_L)|bit(WORD_P)));
+      
+      // Determine coordinate system to change and try to load from EEPROM.
+      if (coord_select > 0) { coord_select--; } // Adjust P1-P6 index to EEPROM coordinate data indexing.
+      else { coord_select = gc_block.modal.coord_select; } // Index P0 as the active coordinate system
+      if (!settings_read_coord_data(coord_select,parameter_data)) { FAIL(STATUS_SETTING_READ_FAIL); } // [EEPROM read fail]
     
-      // Load EEPROM coordinate data and pre-calculate the new coordinate data.
-      if (int_value > 0) { int_value--; } // Adjust P1-P6 index to EEPROM coordinate data indexing.
-      else { int_value = gc_block.modal.coord_select; } // Index P0 as the active coordinate system
-      if (!settings_read_coord_data(int_value,parameter_data)) { FAIL(STATUS_SETTING_READ_FAIL); } // [EEPROM read fail]
+      // Pre-calculate the coordinate data changes. NOTE: Uses parameter_data since coordinate_data may be in use by G54-59.
       for (idx=0; idx<N_AXIS; idx++) { // Axes indices are consistent, so loop may be used.
         // Update axes defined only in block. Always in machine coordinates. Can change non-active system.
         if (bit_istrue(axis_words,bit(idx)) ) {
@@ -602,11 +608,13 @@ uint8_t gc_execute_line(char *line)
         case NON_MODAL_GO_HOME_0: 
           // [G28 Errors]: Cutter compensation is enabled. 
           // Retreive G28 go-home position data (in machine coordinates) from EEPROM
+          if (!axis_words) { axis_command = AXIS_COMMAND_NONE; } // Set to none if no intermediate motion.
           if (!settings_read_coord_data(SETTING_INDEX_G28,parameter_data)) { FAIL(STATUS_SETTING_READ_FAIL); }
           break;
         case NON_MODAL_GO_HOME_1:
           // [G30 Errors]: Cutter compensation is enabled. 
           // Retreive G30 go-home position data (in machine coordinates) from EEPROM
+          if (!axis_words) { axis_command = AXIS_COMMAND_NONE; } // Set to none if no intermediate motion.
           if (!settings_read_coord_data(SETTING_INDEX_G30,parameter_data)) { FAIL(STATUS_SETTING_READ_FAIL); }
           break;
         case NON_MODAL_SET_HOME_0: case NON_MODAL_SET_HOME_1:
@@ -790,18 +798,20 @@ uint8_t gc_execute_line(char *line)
             }
           }
           break;
-        case MOTION_MODE_PROBE:
+        case MOTION_MODE_PROBE_TOWARD: case MOTION_MODE_PROBE_TOWARD_NO_ERROR:
+        case MOTION_MODE_PROBE_AWAY: case MOTION_MODE_PROBE_AWAY_NO_ERROR:
           // [G38 Errors]: Target is same current. No axis words. Cutter compensation is enabled. Feed rate
-          //   is undefined. Probe is triggered.
+          //   is undefined. Probe is triggered. NOTE: Probe check moved to probe cycle. Instead of returning
+          //   an error, it issues an alarm to prevent further motion to the probe. It's also done there to 
+          //   allow the planner buffer to empty and move off the probe trigger before another probing cycle.
           if (!axis_words) { FAIL(STATUS_GCODE_NO_AXIS_WORDS); } // [No axis words]
           if (gc_check_same_position(gc_state.position, gc_block.values.xyz)) { FAIL(STATUS_GCODE_INVALID_TARGET); } // [Invalid target]
-          if (probe_get_state()) { FAIL(STATUS_GCODE_PROBE_TRIGGERED); } // [Probe triggered]
           break;
       } 
     }
   }
   
-  // [21. Program flow ]: No error check required.
+  // [21. Program flow ]: No error checks required.
 
   // [0. Non-specific error-checks]: Complete unused value words check, i.e. IJK used when in arc
   // radius mode, or axis words that aren't used in the block.  
@@ -815,6 +825,9 @@ uint8_t gc_execute_line(char *line)
      Assumes that all error-checking has been completed and no failure modes exist. We just
      need to update the state and execute the block according to the order-of-execution.
   */ 
+  
+  // [0. Non-specific/common error-checks and miscellaneous setup]: 
+  gc_state.line_number = gc_block.values.n;
   
   // [1. Comments feedback ]:  NOT SUPPORTED
   
@@ -832,7 +845,8 @@ uint8_t gc_execute_line(char *line)
     if (gc_state.modal.spindle != SPINDLE_DISABLE) { spindle_run(gc_state.modal.spindle, gc_state.spindle_speed); }
   }
     
-  // [5. Select tool ]: NOT SUPPORTED
+  // [5. Select tool ]: NOT SUPPORTED. Only tracks tool value.
+  gc_state.tool = gc_block.values.t;
 
   // [6. Change tool ]: NOT SUPPORTED
 
@@ -890,31 +904,25 @@ uint8_t gc_execute_line(char *line)
     
   // [19. Go to predefined position, Set G10, or Set axis offsets ]:
   switch(gc_block.non_modal_command) {
-    case NON_MODAL_SET_COORDINATE_DATA:
-
-// TODO: See if I can clean up this int_value.
-      int_value = trunc(gc_block.values.p); // Convert p value to int.
-      if (int_value > 0) { int_value--; } // Adjust P1-P6 index to EEPROM coordinate data indexing.
-      else { int_value = gc_state.modal.coord_select; } // Index P0 as the active coordinate system
-      
-      settings_write_coord_data(int_value,parameter_data);
+    case NON_MODAL_SET_COORDINATE_DATA:    
+      settings_write_coord_data(coord_select,parameter_data);
       // Update system coordinate system if currently active.
-      if (gc_state.modal.coord_select == int_value) { memcpy(gc_state.coord_system,parameter_data,sizeof(parameter_data)); }
+      if (gc_state.modal.coord_select == coord_select) { memcpy(gc_state.coord_system,parameter_data,sizeof(parameter_data)); }
       break;
     case NON_MODAL_GO_HOME_0: case NON_MODAL_GO_HOME_1: 
       // Move to intermediate position before going home. Obeys current coordinate system and offsets 
       // and absolute and incremental modes.
       if (axis_command) {
         #ifdef USE_LINE_NUMBERS
-        mc_line(gc_block.values.xyz, -1.0, false, gc_block.values.n);
+          mc_line(gc_block.values.xyz, -1.0, false, gc_state.line_number);
         #else
-        mc_line(gc_block.values.xyz, -1.0, false);
+          mc_line(gc_block.values.xyz, -1.0, false);
         #endif
       }
       #ifdef USE_LINE_NUMBERS
-      mc_line(parameter_data, -1.0, false, gc_block.values.n); 
+        mc_line(parameter_data, -1.0, false, gc_state.line_number); 
       #else
-      mc_line(parameter_data, -1.0, false); 
+        mc_line(parameter_data, -1.0, false); 
       #endif
       memcpy(gc_state.position, parameter_data, sizeof(parameter_data));
       break;
@@ -942,39 +950,71 @@ uint8_t gc_execute_line(char *line)
       switch (gc_state.modal.motion) {
         case MOTION_MODE_SEEK:
           #ifdef USE_LINE_NUMBERS
-          mc_line(gc_block.values.xyz, -1.0, false, gc_block.values.n);
+            mc_line(gc_block.values.xyz, -1.0, false, gc_state.line_number);
           #else
-          mc_line(gc_block.values.xyz, -1.0, false);
+            mc_line(gc_block.values.xyz, -1.0, false);
           #endif
           break;
         case MOTION_MODE_LINEAR:
           #ifdef USE_LINE_NUMBERS
-          mc_line(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, gc_block.values.n);
+            mc_line(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, gc_state.line_number);
           #else
-          mc_line(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate);
+            mc_line(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate);
           #endif
           break;
-        case MOTION_MODE_CW_ARC: case MOTION_MODE_CCW_ARC:
+        case MOTION_MODE_CW_ARC: 
           #ifdef USE_LINE_NUMBERS
-          mc_arc(gc_state.position, gc_block.values.xyz, gc_block.values.ijk, gc_block.values.r, 
-            gc_state.feed_rate, gc_state.modal.feed_rate, axis_0, axis_1, axis_linear, gc_block.values.n);  
+            mc_arc(gc_state.position, gc_block.values.xyz, gc_block.values.ijk, gc_block.values.r, 
+              gc_state.feed_rate, gc_state.modal.feed_rate, axis_0, axis_1, axis_linear, true, gc_state.line_number);  
           #else
-          mc_arc(gc_state.position, gc_block.values.xyz, gc_block.values.ijk, gc_block.values.r, 
-            gc_state.feed_rate, gc_state.modal.feed_rate, axis_0, axis_1, axis_linear); 
+            mc_arc(gc_state.position, gc_block.values.xyz, gc_block.values.ijk, gc_block.values.r, 
+              gc_state.feed_rate, gc_state.modal.feed_rate, axis_0, axis_1, axis_linear, true); 
+          #endif
+          break;        
+        case MOTION_MODE_CCW_ARC:
+          #ifdef USE_LINE_NUMBERS
+            mc_arc(gc_state.position, gc_block.values.xyz, gc_block.values.ijk, gc_block.values.r, 
+              gc_state.feed_rate, gc_state.modal.feed_rate, axis_0, axis_1, axis_linear, false, gc_state.line_number);  
+          #else
+            mc_arc(gc_state.position, gc_block.values.xyz, gc_block.values.ijk, gc_block.values.r, 
+              gc_state.feed_rate, gc_state.modal.feed_rate, axis_0, axis_1, axis_linear, false); 
           #endif
           break;
-        case MOTION_MODE_PROBE:
+        case MOTION_MODE_PROBE_TOWARD: 
+          // NOTE: gc_block.values.xyz is returned from mc_probe_cycle with the updated position value. So
+          // upon a successful probing cycle, the machine position and the returned value should be the same.
           #ifdef USE_LINE_NUMBERS
-          mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, gc_block.values.n);
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, false, false, gc_state.line_number);
           #else
-          mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate);
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, false, false);
+          #endif
+          break;
+        case MOTION_MODE_PROBE_TOWARD_NO_ERROR:
+          #ifdef USE_LINE_NUMBERS
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, false, true, gc_state.line_number);
+          #else
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, false, true);
+          #endif
+          break;
+        case MOTION_MODE_PROBE_AWAY:
+          #ifdef USE_LINE_NUMBERS
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, true, false, gc_state.line_number);
+          #else
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, true, false);
+          #endif
+          break;
+        case MOTION_MODE_PROBE_AWAY_NO_ERROR:
+          #ifdef USE_LINE_NUMBERS
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, true, true, gc_state.line_number);
+          #else        
+            mc_probe_cycle(gc_block.values.xyz, gc_state.feed_rate, gc_state.modal.feed_rate, true, true);
           #endif
       }
     
       // As far as the parser is concerned, the position is now == target. In reality the
       // motion control system might still be processing the action and the real tool position
       // in any intermediate location.
-      memcpy(gc_state.position, gc_block.values.xyz, sizeof(gc_block.values.xyz)); // gc.position[] = target[];
+      memcpy(gc_state.position, gc_block.values.xyz, sizeof(gc_block.values.xyz)); // gc_state.position[] = gc_block.values.xyz[]
     }
   }
   
@@ -992,7 +1032,7 @@ uint8_t gc_execute_line(char *line)
     else { gc_state.modal.program_flow = PROGRAM_FLOW_RUNNING; }
   }
     
-  // TBD: % to denote start of program. Sets auto cycle start?
+  // TODO: % to denote start of program. Sets auto cycle start?
   return(STATUS_OK);
 }
         

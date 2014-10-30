@@ -1,9 +1,8 @@
 /*
   print.c - Functions for formatting output strings
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon
 
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,9 +17,12 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
-
-/* This code was initially inspired by the wiring_serial module by David A. Mellis which
-   used to be a part of the Arduino project. */ 
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/ 
 
 #include "system.h"
 #include "serial.h"
@@ -33,6 +35,7 @@ void printString(const char *s)
     serial_write(*s++);
 }
 
+
 // Print a string stored in PGM-memory
 void printPgmString(const char *s)
 {
@@ -40,6 +43,7 @@ void printPgmString(const char *s)
   while ((c = pgm_read_byte_near(s++)))
     serial_write(c);
 }
+
 
 // void printIntegerInBase(unsigned long n, unsigned long base)
 // { 
@@ -62,6 +66,7 @@ void printPgmString(const char *s)
 // 			'A' + buf[i - 1] - 10);
 // }
 
+
 void print_uint8_base2(uint8_t n)
 { 
 	unsigned char buf[8];
@@ -75,6 +80,7 @@ void print_uint8_base2(uint8_t n)
 	for (; i > 0; i--)
 		serial_write('0' + buf[i - 1]);
 }
+
 
 void print_uint8_base10(uint8_t n)
 { 
@@ -95,6 +101,7 @@ void print_uint8_base10(uint8_t n)
       serial_write(buf[i - 1]);
 }
 
+
 void print_uint32_base10(unsigned long n)
 { 
   if (n == 0) {
@@ -114,6 +121,7 @@ void print_uint32_base10(unsigned long n)
     serial_write('0' + buf[i-1]);
 }
 
+
 void printInteger(long n)
 {
   if (n < 0) {
@@ -123,6 +131,7 @@ void printInteger(long n)
     print_uint32_base10(n);
   }
 }
+
 
 // Convert float to string by immediately converting to a long integer, which contains
 // more digits than a float. Number of decimal places, which are tracked by a counter,
@@ -190,3 +199,14 @@ void printFloat_RateValue(float n) {
 }
 
 void printFloat_SettingValue(float n) { printFloat(n,N_DECIMAL_SETTINGVALUE); }
+
+
+// Debug tool to print free memory in bytes at the called point. Not used otherwise.
+void printFreeMemory()
+{
+  extern int __heap_start, *__brkval; 
+  uint16_t free;  // Up to 64k values.
+  free = (int) &free - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+  printInteger((int32_t)free);
+  printString(" ");
+}

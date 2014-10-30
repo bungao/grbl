@@ -1,9 +1,8 @@
 /*
   planner.h - buffers movement commands and manages the acceleration profile plan
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon 
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon 
 
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,11 +17,16 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/ 
 
 #ifndef planner_h
 #define planner_h
 
-#include "system.h"
 
 // The number of linear motions that can be in the plan at any give time
 #ifndef BLOCK_BUFFER_SIZE
@@ -65,9 +69,9 @@ void plan_reset();
 // in millimeters. Feed rate specifies the speed of the motion. If feed rate is inverted, the feed
 // rate is taken to mean "frequency" and would complete the operation in 1/feed_rate minutes.
 #ifdef USE_LINE_NUMBERS
-void plan_buffer_line(float *target, float feed_rate, uint8_t invert_feed_rate, int32_t line_number);
+  void plan_buffer_line(float *target, float feed_rate, uint8_t invert_feed_rate, int32_t line_number);
 #else
-void plan_buffer_line(float *target, float feed_rate, uint8_t invert_feed_rate);
+  void plan_buffer_line(float *target, float feed_rate, uint8_t invert_feed_rate);
 #endif
 
 // Called when the current block is no longer needed. Discards the block and makes the memory
@@ -88,6 +92,9 @@ void plan_sync_position();
 
 // Reinitialize plan with a partially completed block
 void plan_cycle_reinitialize();
+
+// Returns the number of active blocks are in the planner buffer.
+uint8_t plan_get_block_buffer_count();
 
 // Returns the status of the block ring buffer. True, if buffer is full.
 uint8_t plan_check_full_buffer();

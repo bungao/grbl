@@ -1,9 +1,8 @@
 /*
   nuts_bolts.h - Header file for shared definitions, variables, and functions
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon  
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon  
 
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,6 +17,12 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/ 
 
 #ifndef nuts_bolts_h
 #define nuts_bolts_h
@@ -29,6 +34,7 @@
 #define X_AXIS 0 // Axis indexing value. Must start with 0 and be continuous.
 #define Y_AXIS 1
 #define Z_AXIS 2
+// #define A_AXIS 3
 
 #define MM_PER_INCH (25.40)
 #define INCH_PER_MM (0.0393701)
@@ -63,8 +69,7 @@ void delay_ms(uint16_t ms);
 // Delays variable-defined microseconds. Compiler compatibility fix for _delay_us().
 void delay_us(uint32_t us);
 
-uint8_t get_direction_mask(uint8_t i);
-
+// Computes hypotenuse, avoiding avr-gcc's bloated version and the extra error checking.
 float hypot_f(float x, float y);
 
 #endif

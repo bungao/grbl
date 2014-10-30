@@ -1,6 +1,6 @@
 /*
   system.c - Handles system level commands and real-time processes
-  Part of Grbl
+  Part of Grbl v0.9
 
   Copyright (c) 2014 Sungeun K. Jeon  
 
@@ -86,6 +86,11 @@ uint8_t system_execute_line(char *line)
   float parameter, value;
   switch( line[char_counter] ) {
     case 0 : report_grbl_help(); break;
+    case '$' : // Prints Grbl settings
+      if ( line[++char_counter] != 0 ) { return(STATUS_INVALID_STATEMENT); }
+      if ( sys.state & (STATE_CYCLE | STATE_HOLD) ) { return(STATUS_IDLE_ERROR); } // Block during cycle. Takes too long to print.
+      else { report_grbl_settings(); }
+      break;
     case 'G' : // Prints gcode parser state
       if ( line[++char_counter] != 0 ) { return(STATUS_INVALID_STATEMENT); }
       else { report_gcode_modes(); }
@@ -128,10 +133,6 @@ uint8_t system_execute_line(char *line)
       // Block any system command that requires the state as IDLE/ALARM. (i.e. EEPROM, homing)
       if ( !(sys.state == STATE_IDLE || sys.state == STATE_ALARM) ) { return(STATUS_IDLE_ERROR); }
       switch( line[char_counter] ) {
-        case '$' : // Prints Grbl settings [IDLE/ALARM]
-          if ( line[++char_counter] != 0 ) { return(STATUS_INVALID_STATEMENT); }
-          else { report_grbl_settings(); }
-          break;
         case '#' : // Print Grbl NGC parameters
           if ( line[++char_counter] != 0 ) { return(STATUS_INVALID_STATEMENT); }
           else { report_ngc_parameters(); }
@@ -145,11 +146,8 @@ uint8_t system_execute_line(char *line)
           break;
         case 'I' : // Print or store build info. [IDLE/ALARM]
           if ( line[++char_counter] == 0 ) { 
-            if (!(settings_read_build_info(line))) {
-              report_status_message(STATUS_SETTING_READ_FAIL);
-            } else {
-              report_build_info(line);
-            }
+            settings_read_build_info(line);
+            report_build_info(line);
           } else { // Store startup line [IDLE/ALARM]
             if(line[char_counter++] != '=') { return(STATUS_INVALID_STATEMENT); }
             helper_var = char_counter; // Set helper variable as counter to start of user info line.
@@ -192,8 +190,8 @@ uint8_t system_execute_line(char *line)
             }
           } else { // Store global setting.
             if(!read_float(line, &char_counter, &value)) { return(STATUS_BAD_NUMBER_FORMAT); }
-            if(line[char_counter] != 0) { return(STATUS_INVALID_STATEMENT); }
-            return(settings_store_global_setting(parameter, value));
+            if((line[char_counter] != 0) || (parameter > 255)) { return(STATUS_INVALID_STATEMENT); }
+            return(settings_store_global_setting((uint8_t)parameter, value));
           }
       }    
   }

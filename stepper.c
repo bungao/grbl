@@ -1,9 +1,8 @@
 /*
   stepper.c - stepper motor driver: executes motion plans using stepper motors
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon
   
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,6 +17,12 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/ 
 
 #include "system.h"
 #include "nuts_bolts.h"
@@ -109,6 +114,10 @@ static volatile uint8_t segment_buffer_tail;
 static uint8_t segment_buffer_head;
 static uint8_t segment_next_head;
 
+// Step and direction port invert masks. 
+static uint8_t step_port_invert_mask;
+static uint8_t dir_port_invert_mask;
+
 // Used to avoid ISR nesting of the "Stepper Driver Interrupt". Should never occur though.
 static volatile uint8_t busy;   
 
@@ -194,8 +203,8 @@ void st_wake_up()
 
   if (sys.state & (STATE_CYCLE | STATE_HOMING)){
     // Initialize stepper output bits
-    st.dir_outbits = settings.dir_invert_mask; 
-    st.step_outbits = settings.step_invert_mask;
+    st.dir_outbits = dir_port_invert_mask; 
+    st.step_outbits = step_port_invert_mask;
     
     // Initialize step pulse timing from settings. Here to ensure updating after re-writing.
     #ifdef STEP_PULSE_DELAY
@@ -367,7 +376,7 @@ ISR(TIMER1_COMPA_vect)
         st.counter_z = st.counter_x;        
       }
 
-      st.dir_outbits = st.exec_block->direction_bits ^ settings.dir_invert_mask; 
+      st.dir_outbits = st.exec_block->direction_bits ^ dir_port_invert_mask; 
 
       #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
         // With AMASS enabled, adjust Bresenham axis increment counters according to AMASS level.
@@ -436,7 +445,7 @@ ISR(TIMER1_COMPA_vect)
     if ( ++segment_buffer_tail == SEGMENT_BUFFER_SIZE) { segment_buffer_tail = 0; }
   }
 
-  st.step_outbits ^= settings.step_invert_mask;  // Apply step port invert mask    
+  st.step_outbits ^= step_port_invert_mask;  // Apply step port invert mask    
   busy = false;
 // SPINDLE_ENABLE_PORT ^= 1<<SPINDLE_ENABLE_BIT; // Debug: Used to time ISR
 }
@@ -456,10 +465,14 @@ ISR(TIMER1_COMPA_vect)
 ISR(TIMER0_OVF_vect)
 {
   // Reset stepping pins (leave the direction pins)
+<<<<<<< HEAD
   //STEP_PORT = (STEP_PORT & ~STEP_MASK) | (settings.step_invert_mask & STEP_MASK); 
   STEP_PORT_X &= ~(1 << STEP_X);
   STEP_PORT_Y &= ~(1 << STEP_Y);
   STEP_PORT_Z &= ~(1 << STEP_Z);
+=======
+  STEP_PORT = (STEP_PORT & ~STEP_MASK) | (step_port_invert_mask & STEP_MASK); 
+>>>>>>> upstream/edge
   TCCR0B = 0; // Disable Timer0 to prevent re-entering this interrupt when it's not needed. 
 }
 #ifdef STEP_PULSE_DELAY
@@ -476,21 +489,40 @@ ISR(TIMER0_OVF_vect)
 #endif
 
 
+// Generates the step and direction port invert masks used in the Stepper Interrupt Driver.
+void st_generate_step_dir_invert_masks()
+{  
+  uint8_t idx;
+  step_port_invert_mask = 0;
+  dir_port_invert_mask = 0;
+  for (idx=0; idx<N_AXIS; idx++) {
+    if (bit_istrue(settings.step_invert_mask,bit(idx))) { step_port_invert_mask |= get_step_pin_mask(idx); }
+    if (bit_istrue(settings.dir_invert_mask,bit(idx))) { dir_port_invert_mask |= get_direction_pin_mask(idx); }
+  }
+}
+
+
 // Reset and clear stepper subsystem variables
 void st_reset()
 {
   // Initialize stepper driver idle state.
   st_go_idle();
   
+  // Initialize stepper algorithm variables.
   memset(&prep, 0, sizeof(prep));
   memset(&st, 0, sizeof(st));
   st.exec_segment = NULL;
   pl_block = NULL;  // Planner block pointer used by segment buffer
-
   segment_buffer_tail = 0;
   segment_buffer_head = 0; // empty = tail
   segment_next_head = 1;
   busy = false;
+  
+  st_generate_step_dir_invert_masks();
+      
+  // Initialize step and direction port pins.
+  STEP_PORT = (STEP_PORT & ~STEP_MASK) | step_port_invert_mask;
+  DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | dir_port_invert_mask;
 }
 
 
@@ -498,12 +530,11 @@ void st_reset()
 void stepper_init()
 {
   // Configure step and direction interface pins
-  /*STEP_DDR |= STEP_MASK;
-  STEP_PORT = (STEP_PORT & ~STEP_MASK) | settings.step_invert_mask;
+  /*
+  STEP_DDR |= STEP_MASK;
   STEPPERS_DISABLE_DDR |= 1<<STEPPERS_DISABLE_BIT;
   DIRECTION_DDR |= DIRECTION_MASK;
-  DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | settings.dir_invert_mask;
-  */
+   */
   
   STEP_DDR_X |= (1<<STEP_X);
   STEP_DDR_Y |= (1<<STEP_Y);
@@ -515,6 +546,7 @@ void stepper_init()
   
   STEPPERS_DISABLE_DDR |= 1<<STEPPERS_DISABLE_BIT;
   STEPPERS_DISABLE_Z_DDR |= 1<<STEPPERS_DISABLE_Z_BIT;
+
 
   // Configure Timer 1: Stepper Driver Interrupt
   TCCR1B &= ~(1<<WGM13); // waveform generation = 0100 = CTC
@@ -669,7 +701,6 @@ void st_prep_buffer()
           prep.maximum_speed = prep.exit_speed;
         }
       }  
-          
     }
 
     // Initialize new segment
@@ -720,6 +751,8 @@ void st_prep_buffer()
           break;
         case RAMP_CRUISE: 
           // NOTE: mm_var used to retain the last mm_remaining for incomplete segment time_var calculations.
+          // NOTE: If maximum_speed*time_var value is too low, round-off can cause mm_var to not change. To 
+          //   prevent this, simply enforce a minimum speed threshold in the planner.
           mm_var = mm_remaining - prep.maximum_speed*time_var;
           if (mm_var < prep.decelerate_after) { // End of cruise. 
             // Cruise-deceleration junction or end of block.
@@ -868,9 +901,6 @@ void st_prep_buffer()
       }
     }
 
-// int32_t blength = segment_buffer_head - segment_buffer_tail;
-// if (blength < 0) { blength += SEGMENT_BUFFER_SIZE; } 
-// printInteger(blength);
   } 
 }      
 
@@ -880,38 +910,11 @@ void st_prep_buffer()
 // in the segment buffer. It will always be behind by up to the number of segment blocks (-1)
 // divided by the ACCELERATION TICKS PER SECOND in seconds. 
 #ifdef REPORT_REALTIME_RATE
-float st_get_realtime_rate()
-{
-   if (sys.state & (STATE_CYCLE | STATE_HOMING)){
-     return prep.current_speed;
-   }
-  return 0.0f;
-}
+  float st_get_realtime_rate()
+  {
+     if (sys.state & (STATE_CYCLE | STATE_HOMING | STATE_HOLD)){
+       return prep.current_speed;
+     }
+    return 0.0f;
+  }
 #endif
- 
-/* 
-   TODO: With feedrate overrides, increases to the override value will not significantly
-     change the current planner and stepper operation. When the value increases, we simply
-     need to recompute the block plan with new nominal speeds and maximum junction velocities.
-     However with a decreasing feedrate override, this gets a little tricky. The current block
-     plan is optimal, so if we try to reduce the feed rates, it may be impossible to create 
-     a feasible plan at its current operating speed and decelerate down to zero at the end of
-     the buffer. We first have to enforce a deceleration to meet and intersect with the reduced
-     feedrate override plan. For example, if the current block is cruising at a nominal rate
-     and the feedrate override is reduced, the new nominal rate will now be lower. The velocity
-     profile must first decelerate to the new nominal rate and then follow on the new plan. 
-        Another issue is whether or not a feedrate override reduction causes a deceleration
-     that acts over several planner blocks. For example, say that the plan is already heavily
-     decelerating throughout it, reducing the feedrate override will not do much to it. So,
-     how do we determine when to resume the new plan? One solution is to tie into the feed hold
-     handling code to enforce a deceleration, but check when the current speed is less than or
-     equal to the block maximum speed and is in an acceleration or cruising ramp. At this 
-     point, we know that we can recompute the block velocity profile to meet and continue onto
-     the new block plan.
-       One "easy" way to do this is to have the step segment buffer enforce a deceleration and
-     continually re-plan the planner buffer until the plan becomes feasible. This can work
-     and may be easy to implement, but it expends a lot of CPU cycles and may block out the
-     rest of the functions from operating at peak efficiency. Still the question is how do 
-     we know when the plan is feasible in the context of what's already in the code and not
-     require too much more code? 
-*/

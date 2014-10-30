@@ -1,9 +1,8 @@
 /*
   nuts_bolts.c - Shared functions
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon
 
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,8 +17,15 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/ 
 
 #include "system.h"
+#include "print.h"
 
 
 #define MAX_INT_DIGITS 8 // Maximum number of digits in int32 (and float)
@@ -139,21 +145,5 @@ void delay_us(uint32_t us)
 }
 
 
-// Returns direction mask according to Grbl internal axis indexing.
-uint8_t get_direction_mask(uint8_t axis_idx)
-{
-  uint8_t axis_mask = 0;
-  switch( axis_idx ) {
-    case X_AXIS: axis_mask = (1<<X_DIRECTION_BIT); break;
-    case Y_AXIS: axis_mask = (1<<Y_DIRECTION_BIT); break;
-    case Z_AXIS: axis_mask = (1<<Z_DIRECTION_BIT); break;
-  }
-  return(axis_mask);
-}
-
-
-float hypot_f(float x, float y)
-{
-   return(sqrt(x*x + y*y));
-}
-
+// Simple hypotenuse computation function.
+float hypot_f(float x, float y) { return(sqrt(x*x + y*y)); }

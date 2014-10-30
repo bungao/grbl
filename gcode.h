@@ -1,9 +1,8 @@
 /*
   gcode.h - rs274/ngc parser.
-  Part of Grbl
+  Part of Grbl v0.9
 
-  Copyright (c) 2011-2014 Sungeun K. Jeon
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
+  Copyright (c) 2012-2014 Sungeun K. Jeon
   
   Grbl is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -18,11 +17,16 @@
   You should have received a copy of the GNU General Public License
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
+/* 
+  This file is based on work from Grbl v0.8, distributed under the 
+  terms of the MIT-license. See COPYING for more details.  
+    Copyright (c) 2009-2011 Simen Svale Skogsrud
+    Copyright (c) 2011-2012 Sungeun K. Jeon
+*/  
 
 #ifndef gcode_h
 #define gcode_h
 
-#include "system.h"
 
 // Define modal group internal numbers for checking multiple command violations and tracking the 
 // type of command that is called in the block. A modal group is a group of g-code commands that are
@@ -67,8 +71,11 @@
 #define MOTION_MODE_LINEAR 1 // G1
 #define MOTION_MODE_CW_ARC 2  // G2
 #define MOTION_MODE_CCW_ARC 3  // G3
-#define MOTION_MODE_PROBE 4 // G38.2
-#define MOTION_MODE_NONE 5 // G80
+#define MOTION_MODE_PROBE_TOWARD 4 // G38.2
+#define MOTION_MODE_PROBE_TOWARD_NO_ERROR 5 // G38.3
+#define MOTION_MODE_PROBE_AWAY 6 // G38.4
+#define MOTION_MODE_PROBE_AWAY_NO_ERROR 7 // G38.5
+#define MOTION_MODE_NONE 8 // G80
 
 // Modal Group G2: Plane select
 #define PLANE_SELECT_XY 0 // G17 (Default: Must be zero)
@@ -128,7 +135,7 @@
 
 // NOTE: When this struct is zeroed, the above defines set the defaults for the system.
 typedef struct {
-  uint8_t motion;        // {G0,G1,G2,G3,G80}
+  uint8_t motion;        // {G0,G1,G2,G3,G38.2,G80}
   uint8_t feed_rate;     // {G93,G94}
   uint8_t units;         // {G20,G21}
   uint8_t distance;      // {G90,G91}
@@ -149,7 +156,7 @@ typedef struct {
   // float q;      // G82 peck drilling
   float r;         // Arc radius
   float s;         // Spindle speed
-  // uint8_t t;    // Tool selection
+  uint8_t t;       // Tool selection
   float xyz[3];    // X,Y,Z Translational axes
 } gc_values_t;
 
@@ -160,6 +167,7 @@ typedef struct {
   float spindle_speed;          // RPM
   float feed_rate;              // Millimeters/min
   uint8_t tool;                 // Tracks tool number. NOT USED.
+  int32_t line_number;          // Last line number sent
 
   float position[N_AXIS];       // Where the interpreter considers the tool to be at this point in the code
 
